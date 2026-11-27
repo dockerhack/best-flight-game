@@ -1,38 +1,55 @@
-// main.ts — hands the game in. Copies game/ and screenshots/ from this
-// repository to /output (MAKEFUN_OUTPUT_DIR outside the grader) and writes
-// /output/dossier.json with buildDossier from vendor/makefun-game.ts, the
-// kit's copy, unchanged. The scorer rebuilds the dossier the same way and
-// requires the two to match byte for byte.
+// main.ts — the entrypoint the grader runs (node22 main.ts).
+// It stages this repository's playable game and its screenshots into the
+// grader's output directory and writes the dossier the scorer rebuilds
+// from the same files. The scorer requires the two dossiers to be
+// byte-for-byte identical, so this file does the staging exactly once,
+// from the committed files, and nothing else.
 
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const out = process.env.MAKEFUN_OUTPUT_DIR || '/output';
-const here = dirname(fileURLToPath(import.meta.url));
+// Where the staged entry goes: the grader's directory, or /output locally.
+const outDir = process.env.MAKEFUN_OUTPUT_DIR || '/output';
+// The repository root: the directory this file lives in.
+const repoRoot = dirname(fileURLToPath(import.meta.url));
 
-// Fail loudly, before copying anything, when the entry is incomplete.
-if (!existsSync(join(here, 'game', 'index.html'))) {
-  throw new Error('game/index.html is missing — the entry is not complete');
+const gameEntry = join(repoRoot, 'game', 'index.html');
+const shotsDir = join(repoRoot, 'screenshots');
+
+// Refuse to hand in half an entry: check first, copy nothing yet.
+if (!existsSync(gameEntry)) {
+  throw new Error('game/index.html is missing — the game is not complete');
 }
-if (!existsSync(join(here, 'screenshots'))) {
-  throw new Error('screenshots/ is missing — take the 4 shots first');
+if (!existsSync(shotsDir)) {
+  throw new Error('screenshots/ is missing — render the shots first');
 }
 
-mkdirSync(out, { recursive: true });
-rmSync(join(out, 'game'), { recursive: true, force: true });
-rmSync(join(out, 'screenshots'), { recursive: true, force: true });
-rmSync(join(out, 'dossier.json'), { force: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// Stage a clean copy: drop whatever a previous run left behind.
+mkdirSync(outDir, { recursive: true });
+rmSync(join(outDir, 'game'), { recursive: true, force: true });
+rmSync(join(outDir, 'screenshots'), { recursive: true, force: true });
+rmSync(join(outDir, 'dossier.json'), { force: true });
+cpSync(join(repoRoot, 'game'), join(outDir, 'game'), { recursive: true });
+cpSync(shotsDir, join(outDir, 'screenshots'), { recursive: true });
 
-const dossier = buildDossier(out, {
+// The dossier of the staged entry, under the competition's caps.
+// These numbers are the competition gate's own caps, so the dossier this
+// program writes is the one the scorer rebuilds from the same staged files.
+const dossier = buildDossier(outDir, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
 });
-writeFileSync(join(out, 'dossier.json'), dossier);
-console.log('wrote ' + join(out, 'dossier.json') + ' (' + dossier.length + ' bytes)');
+
+// A zero-byte dossier would hand in nothing while looking like a success.
+if (dossier.length === 0) {
+  throw new Error('buildDossier returned an empty dossier — nothing to hand in');
+}
+
+const dossierPath = join(outDir, 'dossier.json');
+writeFileSync(dossierPath, dossier);
+console.log(`wrote ${dossierPath} (${dossier.length} bytes)`);
